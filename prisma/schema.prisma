@@ -1,0 +1,328 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  CARD
+  CREDIT
+}
+
+enum Role {
+  OWNER
+  WORKER
+}
+
+enum CreditTxnType {
+  DEBIT
+  CREDIT
+}
+
+// =============================================================
+// 1. SHOPS TABLE
+// =============================================================
+model Shop {
+  id             Int       @id @default(autoincrement())
+  shopCode       String    @unique @map("shop_code") @db.VarChar(20)
+  rtoCode        String    @map("rto_code") @db.VarChar(10)
+  shopName       String    @map("shop_name") @db.VarChar(255)
+  ownerName      String?   @map("owner_name") @db.VarChar(255)
+  phone          String    @unique @db.VarChar(20)
+  password       String    @db.VarChar(255)
+  district       String?   @db.VarChar(100)
+  state          String?   @db.VarChar(100)
+  
+  isMasterBanned Boolean   @default(false) @map("is_master_banned")
+  banExpiresAt   DateTime? @map("ban_expires_at")
+  
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  users              User[]
+  godowns            Godown[]
+  shopInventory      ShopInventory[]
+  shopLooseItems     ShopLooseItem[]
+  sales              Sale[]
+  customers          Customer[]
+  creditTransactions CreditTransaction[]
+  batches            ProductBatch[]
+
+  @@map("shops")
+}
+
+// =============================================================
+// 1.5. USERS / STAFF TABLE
+// =============================================================
+model User {
+  id        Int      @id @default(autoincrement())
+  shopId    Int      @map("shop_id")
+  name      String   @db.VarChar(255)
+  email     String   @unique @db.VarChar(255)
+  password  String   @db.VarChar(255)
+  phone     String?  @db.VarChar(20)
+  role      Role     @default(WORKER)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade, map: "fk_users_shop_id")
+
+  @@index([shopId])
+  @@map("users")
+}
+
+// =============================================================
+// 2. GODOWNS TABLE
+// =============================================================
+model Godown {
+  id         Int     @id @default(autoincrement())
+  shopId     Int     @map("shop_id")
+  godownName String  @map("godown_name") @db.VarChar(100)
+  address    String? @db.Text
+
+  shop            Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  godownInventory GodownInventory[]
+
+  @@index([shopId])
+  @@map("godowns")
+}
+
+// =============================================================
+// 3. MASTER PRODUCTS TABLE (Global Barcoded Catalog)
+// =============================================================
+model MasterProduct {
+  id           Int      @id @default(autoincrement())
+  barcode      String   @unique @db.VarChar(100) // EAN-13, UPC Barcode
+  cartonCode   String?  @unique @map("carton_code") @db.VarChar(100) // Outer Carton ITF-14 Barcode
+  productName  String   @map("product_name") @db.VarChar(255)
+  mrp          Decimal  @db.Decimal(10, 2)
+  unitsPerCase Int      @default(1) @map("units_per_case")
+  netWeight    String?  @map("net_weight") @db.VarChar(50)
+  imageUrl     String?  @map("image_url") @db.Text
+  category     String?  @db.VarChar(100)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  shopInventory   ShopInventory[]
+  godownInventory GodownInventory[]
+  saleItems       SaleItem[]
+  batches         ProductBatch[]
+
+  @@index([productName])
+  @@map("master_products")
+}
+
+// =============================================================
+// 3.5. BATCH TABLE (Expiry, MRP & Direct Barcode/Name Tracking)
+// =============================================================
+model ProductBatch {
+  id          Int      @id @default(autoincrement())
+  shopId      Int      @map("shop_id")
+  productId   Int      @map("product_id")
+  barcode     String?  @db.VarChar(100) // 👈 Direct Barcode Access
+  productName String?  @map("product_name") @db.VarChar(255) // 👈 Direct Product Name
+  batchNumber String   @map("batch_number") @db.VarChar(100)
+  mrp         Decimal  @db.Decimal(10, 2)
+  expiryDate  DateTime @map("expiry_date") @db.Date
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  shop            Shop              @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  product         MasterProduct     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  shopInventory   ShopInventory[]
+  godownInventory GodownInventory[]
+  saleItems       SaleItem[]
+
+  @@unique([shopId, productId, batchNumber], name: "shop_product_batch_unique")
+  @@index([shopId])
+  @@index([productId])
+  @@index([barcode])
+  @@index([expiryDate])
+  @@map("product_batches")
+}
+
+// =============================================================
+// 4. SHOP INVENTORY (Master Products Stock, Fast Direct Lookup)
+// =============================================================
+model ShopInventory {
+  id           Int      @id @default(autoincrement())
+  shopId       Int      @map("shop_id")
+  productId    Int      @map("product_id")
+  batchId      Int      @map("batch_id")
+
+  barcode      String?  @db.VarChar(100) // 👈 Denormalized for ultra-fast barcode lookup
+  productName  String?  @map("product_name") @db.VarChar(255) // 👈 Denormalized for instant UI rendering
+
+  // Pricing & Stock
+  quantity     Int      @default(0)
+  sellingPrice Decimal  @map("selling_price") @db.Decimal(10, 2) // Shop Custom Selling Price
+  discount     Decimal  @default(0.00) @db.Decimal(5, 2)         // Discount % relative to MRP
+
+  reorderLevel Int?     @default(20) @map("reorder_level")
+  sectionName  String?  @map("section_name") @db.VarChar(50)
+  rackNumber   String?  @map("rack_number") @db.VarChar(50)
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  shop    Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  product MasterProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batch   ProductBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, productId, batchId], name: "shop_product_batch_unique_inv")
+  @@index([shopId])
+  @@index([productId])
+  @@index([barcode])
+  @@map("shop_inventory")
+}
+
+// =============================================================
+// 4.5. SHOP LOOSE ITEMS (Unbarcoded / Custom Local Items)
+// =============================================================
+model ShopLooseItem {
+  id            Int      @id @default(autoincrement())
+  shopId        Int      @map("shop_id")
+  customBarcode String   @map("custom_barcode") @db.VarChar(100) // e.g. LOOSE-98213
+  customName    String   @map("custom_name") @db.VarChar(255)
+  category      String?  @db.VarChar(100)
+  netWeight     String?  @map("net_weight") @db.VarChar(50)
+  mrp           Decimal  @db.Decimal(10, 2)
+  sellingPrice  Decimal  @map("selling_price") @db.Decimal(10, 2)
+  quantity      Int      @default(0)
+  imageUrl      String?  @map("image_url") @db.Text
+  sectionName   String?  @map("section_name") @db.VarChar(50)
+  rackNumber    String?  @map("rack_number") @db.VarChar(50)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  shop      Shop       @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  saleItems SaleItem[]
+
+  @@unique([shopId, customBarcode], name: "shop_custom_barcode_unique")
+  @@index([shopId])
+  @@index([customName])
+  @@map("shop_loose_items")
+}
+
+// =============================================================
+// 5. GODOWN INVENTORY (Direct Barcode Search Ready)
+// =============================================================
+model GodownInventory {
+  id          Int     @id @default(autoincrement())
+  godownId    Int     @map("godown_id")
+  productId   Int     @map("product_id")
+  batchId     Int     @map("batch_id")
+
+  barcode     String? @db.VarChar(100) // 👈 Direct Barcode search in Godown
+  productName String? @map("product_name") @db.VarChar(255) // 👈 Direct Name
+
+  quantity    Int     @default(0)
+  sectionName String? @map("section_name") @db.VarChar(50)
+  rackNumber  String? @map("rack_number") @db.VarChar(50)
+
+  godown  Godown        @relation(fields: [godownId], references: [id], onDelete: Cascade)
+  product MasterProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batch   ProductBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([godownId])
+  @@index([productId])
+  @@index([barcode])
+  @@map("godown_inventory")
+}
+
+// =============================================================
+// 6. SALES / TRANSACTIONS TABLE
+// =============================================================
+model Sale {
+  id            Int         @id @default(autoincrement())
+  shopId        Int         @map("shop_id")
+  customerId    Int?        @map("customer_id")
+  totalAmount   Decimal     @map("total_amount") @db.Decimal(10, 2)
+  discount      Float?
+  paymentMode   PaymentMode @default(CASH) @map("payment_mode")
+  customerPhone String?     @map("customer_phone") @db.VarChar(20)
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  shop       Shop               @relation(fields: [shopId], references: [id])
+  customer   Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  saleItems  SaleItem[]
+  creditTxns CreditTransaction[]
+
+  @@index([shopId])
+  @@index([customerId])
+  @@map("sales")
+}
+
+// =============================================================
+// 7. SALE ITEMS TABLE
+// =============================================================
+model SaleItem {
+  id           Int      @id @default(autoincrement())
+  saleId       Int      @map("sale_id")
+  
+  productId    Int?     @map("product_id")
+  batchId      Int?     @map("batch_id")
+  looseItemId  Int?     @map("loose_item_id")
+  
+  itemName     String   @map("item_name") @db.VarChar(255)
+  quantity     Int
+  pricePerUnit Decimal  @map("price_per_unit") @db.Decimal(10, 2)
+
+  sale      Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product   MasterProduct? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  batch     ProductBatch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  looseItem ShopLooseItem? @relation(fields: [looseItemId], references: [id], onDelete: SetNull)
+
+  @@index([saleId])
+  @@index([productId])
+  @@index([looseItemId])
+  @@map("sale_items")
+}
+
+// =============================================================
+// 8. CUSTOMER TABLE
+// =============================================================
+model Customer {
+  id        Int      @id @default(autoincrement())
+  shopId    Int      @map("shop_id")
+  name      String?  @db.VarChar(255)
+  phone     String   @db.VarChar(20)
+  totalDue  Decimal  @default(0.00) @map("total_due") @db.Decimal(10, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop       Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  sales      Sale[]
+  creditTxns CreditTransaction[]
+
+  @@unique([shopId, phone], name: "shop_customer_phone_unique")
+  @@index([shopId])
+  @@map("customers")
+}
+
+// =============================================================
+// 9. CREDIT TRANSACTION TABLE
+// =============================================================
+model CreditTransaction {
+  id         Int           @id @default(autoincrement())
+  shopId     Int           @map("shop_id")
+  customerId Int           @map("customer_id")
+  saleId     Int?          @map("sale_id")
+  type       CreditTxnType
+  amount     Decimal       @db.Decimal(10, 2)
+  note       String?       @db.VarChar(255)
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  shop     Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  sale     Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
+
+  @@index([shopId])
+  @@index([customerId])
+  @@index([saleId])
+  @@map("credit_transactions")
+}
