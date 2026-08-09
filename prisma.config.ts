@@ -1,9 +1,19 @@
-import { defineConfig } from "@prisma/config";
+// import { defineConfig } from "@prisma/config";
 
-export default defineConfig({
+// export default defineConfig({
+//   earlyAccess: true,
+//   schema: "prisma/schema.prisma",
+//   datasource: {
+//     url: process.env.DATABASE_URL,
+//   },
+// });
+
+
+
+module.exports = {
   earlyAccess: true,
   schema: "prisma/schema.prisma",
   datasource: {
     url: process.env.DATABASE_URL,
   },
-});
+};
