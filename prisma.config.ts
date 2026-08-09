@@ -2,17 +2,11 @@ import { defineConfig } from "@prisma/config";
 
 export default defineConfig({
   earlyAccess: true,
-  schema: {
-    kind: "single",
-    filePath: "prisma/schema.prisma",
-  },
-  migrations: {
-    initShadowDatabase: false,
-  },
-  datasources: [
-    {
+  schema: "prisma/schema.prisma", // Direct string pass karein, object nahi
+  datasources: {
+    db: {
       provider: "mysql",
-      url: process.env.DATABASE_URL!,
+      url: process.env.DATABASE_URL || "",
     },
-  ],
+  },
 });
