@@ -1,9 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
-  provider = "mysql"
+  provider     = "mysql"
+  url          = env("DATABASE_URL")
+  relationMode = "prisma"
 }
 
 enum PaymentMode {
@@ -123,8 +126,8 @@ model ProductBatch {
   id          Int      @id @default(autoincrement())
   shopId      Int      @map("shop_id")
   productId   Int      @map("product_id")
-  barcode     String?  @db.VarChar(100) // 👈 Direct Barcode Access
-  productName String?  @map("product_name") @db.VarChar(255) // 👈 Direct Product Name
+  barcode     String?  @db.VarChar(100) // Direct Barcode Access
+  productName String?  @map("product_name") @db.VarChar(255) // Direct Product Name
   batchNumber String   @map("batch_number") @db.VarChar(100)
   mrp         Decimal  @db.Decimal(10, 2)
   expiryDate  DateTime @map("expiry_date") @db.Date
@@ -154,8 +157,8 @@ model ShopInventory {
   productId    Int      @map("product_id")
   batchId      Int      @map("batch_id")
 
-  barcode      String?  @db.VarChar(100) // 👈 Denormalized for ultra-fast barcode lookup
-  productName  String?  @map("product_name") @db.VarChar(255) // 👈 Denormalized for instant UI rendering
+  barcode      String?  @db.VarChar(100) // Denormalized for ultra-fast barcode lookup
+  productName  String?  @map("product_name") @db.VarChar(255) // Denormalized for instant UI rendering
 
   // Pricing & Stock
   quantity     Int      @default(0)
@@ -217,8 +220,8 @@ model GodownInventory {
   productId   Int     @map("product_id")
   batchId     Int     @map("batch_id")
 
-  barcode     String? @db.VarChar(100) // 👈 Direct Barcode search in Godown
-  productName String? @map("product_name") @db.VarChar(255) // 👈 Direct Name
+  barcode     String? @db.VarChar(100) // Direct Barcode search in Godown
+  productName String? @map("product_name") @db.VarChar(255) // Direct Name
 
   quantity    Int     @default(0)
   sectionName String? @map("section_name") @db.VarChar(50)
@@ -247,8 +250,8 @@ model Sale {
   customerPhone String?     @map("customer_phone") @db.VarChar(20)
   createdAt     DateTime    @default(now()) @map("created_at")
 
-  shop       Shop               @relation(fields: [shopId], references: [id])
-  customer   Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  shop       Shop                @relation(fields: [shopId], references: [id])
+  customer   Customer?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
   saleItems  SaleItem[]
   creditTxns CreditTransaction[]
 
@@ -295,7 +298,7 @@ model Customer {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  shop       Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shop       Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
   sales      Sale[]
   creditTxns CreditTransaction[]
 
