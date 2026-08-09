@@ -16,12 +16,12 @@ app.use(cors());
 
 
 
-app.use("/api/auth", authRouter);
-app.use("/api/product", productRouter);
-app.use("/api/shop", shopRouter);
-app.use("/api/analytics", analyticsRouter);
-app.use("/api/customerCredit", customerCreditRouter);
-app.use("/api/godown", godownRouter); // Added Godown routes
+app.use("/api/v1/auth", authRouter);
+app.use("/api/v1/product", productRouter);
+app.use("/api/v1/shop", shopRouter);
+app.use("/api/v1/analytics", analyticsRouter);
+app.use("/api/v1/customerCredit", customerCreditRouter);
+app.use("/api/v1/godown", godownRouter); // Added Godown routes
 
 
 app.get("/", (req, res) => {
