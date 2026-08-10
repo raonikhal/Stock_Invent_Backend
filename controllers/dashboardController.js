@@ -63,7 +63,7 @@ const getDashboardSummary = async (req, res) => {
 
     // 3. Clean Response Format
     const stats = {
-      shopTotalProducts: uniqueShopProductsCount.length || 0, // Array length gives total unique active items
+      shopTotalProducts: uniqueShopProductsCount.length || 0,// Array length gives total unique active items
       godownStockUnits: godownStockSum._sum?.quantity || 0,
       todaysSoldUnits: todaySoldSum._sum?.quantity || 0,
       lowStockAlertsCount: lowStockGroups.length || 0,
