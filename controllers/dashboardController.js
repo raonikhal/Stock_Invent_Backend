@@ -19,7 +19,8 @@ const getDashboardSummary = async (req, res) => {
 
       select : {
         shopName : true,
-        shopCode : true
+        shopCode : true,
+        district : true,
       }
     }
     )
@@ -80,6 +81,7 @@ const getDashboardSummary = async (req, res) => {
     const stats = {
       shopCode = shopDetails.shopCode,
       shopName = shopDetails.shopName,
+      district = shopDetails.district,
       shopTotalProducts: uniqueShopProductsCount.length || 0,// Array length gives total unique active items
       godownStockUnits: godownStockSum._sum?.quantity || 0,
       todaysSoldUnits: todaySoldSum._sum?.quantity || 0,
