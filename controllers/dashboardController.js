@@ -1,6 +1,5 @@
 const { prisma } = require("../config/db");
 
-
 const getDashboardSummary = async (req, res) => {
   try {
     // 1. Current Date Start & End Boundaries
@@ -12,20 +11,7 @@ const getDashboardSummary = async (req, res) => {
 
     const phone = req.user?.phone;
 
-    prisma.shop.findUnique({
-      where:{
-        phone : phone
-      },
-
-      select : {
-        shopName : true,
-        shopCode : true,
-        district : true,
-      }
-    }
-    )
-
-    // 2. Parallel Queries Execution
+    // 2. Parallel Queries Execution (Shop Query ko Promise.all ke andar shift kiya)
     const [
       shopDetails,
       uniqueShopProductsCount,
@@ -34,19 +20,31 @@ const getDashboardSummary = async (req, res) => {
       lowStockGroups
     ] = await Promise.all([
 
-      // Query 1: Total Unique Products in Shop Inventory (Count unique productIds)
+      // Query 1: Fetch Shop Details by User Phone Number
+      phone 
+        ? prisma.shop.findUnique({
+            where: { phone: phone },
+            select: {
+              shopName: true,
+              shopCode: true,
+              district: true,
+            },
+          })
+        : null,
+
+      // Query 2: Total Unique Products in Shop Inventory
       prisma.shopInventory.groupBy({
         by: ['productId'],
       }),
 
-      // Query 2: Total Quantity in Godown Inventory
+      // Query 3: Total Quantity in Godown Inventory
       prisma.godownInventory.aggregate({
         _sum: {
           quantity: true,
         },
       }),
 
-      // Query 3: Today's Total Sold Items Quantity from Sales
+      // Query 4: Today's Total Sold Items Quantity from Sales
       prisma.saleItem.aggregate({
         _sum: {
           quantity: true,
@@ -61,7 +59,7 @@ const getDashboardSummary = async (req, res) => {
         },
       }),
 
-      // Query 4: Low Stock Items (Grouped by productId where sum of quantity <= 10 or reorderLevel)
+      // Query 5: Low Stock Items
       prisma.shopInventory.groupBy({
         by: ['productId'],
         _sum: {
@@ -70,19 +68,19 @@ const getDashboardSummary = async (req, res) => {
         having: {
           quantity: {
             _sum: {
-              lte: 10, // Stock <= 10 units
+              lte: 10,
             },
           },
         },
       }),
     ]);
 
-    // 3. Clean Response Format
+    // 3. Clean Response Format (Fixed ':' and Optional Chaining '?')
     const stats = {
-      shopCode = shopDetails.shopCode,
-      shopName = shopDetails.shopName,
-      district = shopDetails.district,
-      shopTotalProducts: uniqueShopProductsCount.length || 0,// Array length gives total unique active items
+      shopCode: shopDetails?.shopCode || "N/A",
+      shopName: shopDetails?.shopName || "My Shop",
+      district: shopDetails?.district || "Unknown",
+      shopTotalProducts: uniqueShopProductsCount.length || 0,
       godownStockUnits: godownStockSum._sum?.quantity || 0,
       todaysSoldUnits: todaySoldSum._sum?.quantity || 0,
       lowStockAlertsCount: lowStockGroups.length || 0,
