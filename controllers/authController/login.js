@@ -37,6 +37,7 @@ const loginShop = async (req, res) => {
         shopId: shop.id, 
         shopCode: shop.shopCode, 
         phone: shop.phone, 
+        shopName : shop.shopName, 
         role: "OWNER" // FIXED: Pehle 'user.role' ki wajah se crash ho raha tha
       },
       process.env.JWT_SECRET || 'secret_key_123',
