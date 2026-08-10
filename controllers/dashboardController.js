@@ -10,8 +10,23 @@ const getDashboardSummary = async (req, res) => {
     const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
 
+    const phone = req.user?.phone;
+
+    prisma.shop.findUnique({
+      where:{
+        phone : phone
+      },
+
+      select : {
+        shopName : true,
+        shopCode : true
+      }
+    }
+    )
+
     // 2. Parallel Queries Execution
     const [
+      shopDetails,
       uniqueShopProductsCount,
       godownStockSum,
       todaySoldSum,
@@ -63,6 +78,8 @@ const getDashboardSummary = async (req, res) => {
 
     // 3. Clean Response Format
     const stats = {
+      shopCode = shopDetails.shopCode,
+      shopName = shopDetails.shopName,
       shopTotalProducts: uniqueShopProductsCount.length || 0,// Array length gives total unique active items
       godownStockUnits: godownStockSum._sum?.quantity || 0,
       todaysSoldUnits: todaySoldSum._sum?.quantity || 0,
