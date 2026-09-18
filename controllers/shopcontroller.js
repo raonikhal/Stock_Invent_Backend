@@ -1,7 +1,7 @@
 import {prisma} from '../config/db.js';
 import { generateSequentialShopCode } from '../utils/generateShopCode.js';
 
-export const createShop = async (req, res) => {
+const createShop = async (req, res) => {
   try {
     const { shopName, ownerName, phone, district } = req.body;
 
@@ -38,4 +38,9 @@ export const createShop = async (req, res) => {
     }
     res.status(500).json({ success: false, error: error.message });
   }
+};
+
+
+module.exports = {
+  createShop,
 };

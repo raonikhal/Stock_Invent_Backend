@@ -1,10 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const { protect, authorizeRoles } = require("../middlewares/authMiddleware");
-const { getDailySalesSummary } = require("../controllers/salesAnalyticsController/salesAnalyticsController");
+const { getSalesSummary } = require("../controllers/salesAnalyticsController/salesAnalyticsController");
 
 
-router.get("/dailysummary", protect, authorizeRoles("OWNER"), getDailySalesSummary);
+router.get("/salessummary", protect, authorizeRoles("OWNER"), getSalesSummary);
 
 
 module.exports = router;

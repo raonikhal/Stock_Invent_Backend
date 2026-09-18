@@ -4,9 +4,11 @@ const { generateSequentialShopCode } = require('../../utils/generateShopCode.js'
 
 const registerShop = async (req, res) => {
   try {
-    const { shopName, ownerName, phone, password, confirmpassword, district } = req.body;
+    console.log("Signup Request Received:", req.body);
 
-    if (!phone || !password || !district || !confirmpassword) {
+    const { shopName, ownerName, phone, password, confirmpassword, district, email } = req.body;
+
+    if (!phone || !password || !district || !confirmpassword || !email) {
       return res.status(400).json({ success: false, message: "Phone, Password aur District required hain!" });
     }
 
@@ -14,43 +16,86 @@ const registerShop = async (req, res) => {
       return res.status(400).json({ success: false, message: "Password aur Confirm Password match nahi karte!" });
     }
 
-    // 1. Check if phone is already registered
-    const existingShop = await prisma.shop.findUnique({ where: { phone } });
+    // 1. Check if phone is registered in Shop table
+    const existingShop = await prisma.shop.findUnique({ where: { phone: String(phone) } });
     if (existingShop) {
-      return res.status(400).json({ success: false, message: "Yeh phone number pehle se registered hai!" });
+      return res.status(400).json({ success: false, message: "Yeh phone number pehle se shop table me registered hai!" });
     }
 
-    // 2. Hash Password (Security Best Practice)
+    // 2. Fallback Email & User Table Check
+    const userEmail = email;
+
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: userEmail },
+          { phone: String(phone) }
+        ]
+      }
+    });
+
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: "Yeh Phone/Email user table me pehle se registered hai!" });
+    }
+
+    // 3. Hash Password
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // 3. Generate Sequential RTO Code (e.g., UP50-0001)
+    // 4. Generate Sequential Shop Code
     const codeData = await generateSequentialShopCode(district);
 
-    // 4. Save Shop to DB
-    const newShop = await prisma.shop.create({
+    // 5. Calculate Trial Expiry (Exact Current Time + 2 Mins via Pure Timestamp)
+    const nowMs = Date.now();
+    const trialEndTime = new Date(nowMs + 1 * 60 * 1000); // 120,000 ms
+
+    console.log("Calculated Fresh Trial End Time:", trialEndTime.toISOString());
+
+    // 6. Atomic Transaction: Create Shop + Owner User
+    const result = await prisma.$transaction(async (tx) => {
+      const createdShop = await tx.shop.create({
+        data: {
+          shopCode: codeData.shopCode,
+          rtoCode: codeData.rtoCode,
+          shopName: shopName || "My Store",
+          ownerName: ownerName || "Shop Owner",
+          phone: String(phone),
+          password: hashedPassword,
+          district: codeData.district,
+          state: codeData.state,
+        },
+      });
+
+      const createdUser = await tx.user.create({
+        data: {
+          shopId: createdShop.id,
+          name: ownerName || shopName || "Shop Owner",
+          email: userEmail,
+          password: hashedPassword,
+          phone: String(phone),
+          role: "OWNER",
+          isSubscriptionActive: true,
+          subscriptionEndAt: trialEndTime, // FIXED: Direct JS Date Object (No .toISOString())
+        },
+      });
+
+      return { shop: createdShop, user: createdUser };
+    });
+
+    const { password: _, ...shopData } = result.shop;
+    const { password: __, ...userData } = result.user;
+
+    return res.status(201).json({
+      success: true,
+      message: 'Signup Successful! Shop aur Owner Account generate ho gaya hai.',
       data: {
-        shopCode: codeData.shopCode,
-        rtoCode: codeData.rtoCode,
-        shopName,
-        ownerName,
-        phone,
-        password: hashedPassword,
-        district: codeData.district,
-        state: codeData.state,
+        shop: shopData,
+        user: userData,
       },
     });
-
-    // Password field ko response se hata dein
-    const { password: _, ...shopWithoutPassword } = newShop;
-
-    res.status(201).json({
-      success: true,
-      message: 'Signup Successful! Aapka Shop Code generate ho gaya hai.',
-      data: shopWithoutPassword,
-    });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error("Signup Error Details:", error);
+    return res.status(500).json({ success: false, error: error.message });
   }
 };
 

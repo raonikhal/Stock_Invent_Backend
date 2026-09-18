@@ -1,5 +1,21 @@
-const multer = require('multer');
+// const multer = require('multer');
+// const storage = multer.memoryStorage();
+// const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
+
+// module.exports = upload;
+
+
+
+
+
+const multer = require("multer");
+
+// RAM buffer storage (Local disk use nahi hoga)
 const storage = multer.memoryStorage();
-const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB limit
+});
 
 module.exports = upload;

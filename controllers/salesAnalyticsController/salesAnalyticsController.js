@@ -1,134 +1,118 @@
 const { prisma } = require("../../config/db");
 
-/**
- * @desc    Get Daily Sales, Revenue, Payment Mode Breakup & Top Selling Products
- * @route   GET /api/shopProducts/dailySummary
- * @access  Private (ShopKeeper)
- */
-const getDailySalesSummary = async (req, res) => {
+// Helper function local date YYYY-MM-DD format me lene ke liye
+const getLocalDateString = (d) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getSalesSummary = async (req, res) => {
   try {
     const shopId = req.user.shopId;
+    const { filter = "weekly" } = req.query;
 
-    // Aaj ki start date (00:00:00.000) aur end date (23:59:59.999) calculate karein
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    const now = new Date();
+    let startDate;
+    let graphPointsCount;
 
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
+    if (filter.toLowerCase() === "monthly") {
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      graphPointsCount = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    } else {
+      startDate = new Date();
+      startDate.setDate(now.getDate() - 6);
+      startDate.setHours(0, 0, 0, 0);
+      graphPointsCount = 7;
+    }
 
-    // 1. Aaj ki saari Sales Fetch Karein
-    const todaysSales = await prisma.sale.findMany({
+    // 1. Total Revenue & Total Orders
+    const summary = await prisma.sale.aggregate({
       where: {
         shopId: shopId,
-        createdAt: {
-          gte: startOfDay,
-          lte: endOfDay,
-        },
+        createdAt: { gte: startDate },
       },
-      include: {
-        saleItems: true,
-      },
+      _sum: { totalAmount: true },
+      _count: { id: true },
     });
 
-    // 2. Metrics & Payment Mode Breakup Calculate Karein
-    let totalRevenue = 0;
-    let totalDiscount = 0;
-    let totalItemsSold = 0;
+    const totalSales = Number(summary._sum.totalAmount || 0);
+    const totalOrders = summary._count.id || 0;
 
-    const paymentBreakup = {
-      CASH: 0,
-      UPI: 0,
-      CARD: 0,
-      CREDIT: 0,
-    };
-
-    todaysSales.forEach((sale) => {
-      const saleAmount = parseFloat(sale.totalAmount);
-      const discountAmount = parseFloat(sale.discount || 0);
-
-      totalRevenue += saleAmount;
-      totalDiscount += discountAmount;
-
-      // Payment Mode Tally
-      if (paymentBreakup[sale.paymentMode] !== undefined) {
-        paymentBreakup[sale.paymentMode] += saleAmount;
-      }
-
-      // Total Quantity Tally
-      sale.saleItems.forEach((item) => {
-        totalItemsSold += item.quantity;
-      });
-    });
-
-    // 3. Top 5 Best-Selling Products (Aaj ke)
-    const topProductsRaw = await prisma.saleItem.groupBy({
-      by: ["productId"],
+    // 2. Fetch Sales Data
+    const salesList = await prisma.sale.findMany({
       where: {
-        sale: {
-          shopId: shopId,
-          createdAt: {
-            gte: startOfDay,
-            lte: endOfDay,
-          },
-        },
+        shopId: shopId,
+        createdAt: { gte: startDate },
       },
-      _sum: {
-        quantity: true,
+      select: {
+        createdAt: true,
+        totalAmount: true,
       },
-      orderBy: {
-        _sum: {
-          quantity: "desc",
-        },
-      },
-      take: 5,
     });
 
-    // Top products ke Details (Name, Barcode) MasterProduct se Attach Karein
-    const topProducts = await Promise.all(
-      topProductsRaw.map(async (item) => {
-        const product = await prisma.masterProduct.findUnique({
-          where: { id: item.productId },
-          select: { productName: true, barcode: true, mrp: true },
-        });
+    const salesMap = {};
+    salesList.forEach((item) => {
+      // 🟢 Local timezone date string format
+      const dateStr = getLocalDateString(new Date(item.createdAt));
+      const amount = Number(item.totalAmount || 0);
+      salesMap[dateStr] = (salesMap[dateStr] || 0) + amount;
+    });
 
-        return {
-          productId: item.productId,
-          productName: product?.productName || "Unknown",
-          barcode: product?.barcode || "",
-          totalQuantitySold: item._sum.quantity,
-        };
-      })
-    );
+    const graphData = [];
+    for (let i = 0; i < graphPointsCount; i++) {
+      const tempDate = new Date(startDate);
+      tempDate.setDate(startDate.getDate() + i);
+      const dateStr = getLocalDateString(tempDate);
+      graphData.push(salesMap[dateStr] || 0);
+    }
 
-    // 4. Response Construct
-    res.status(200).json({
+    // 3. Top Products Raw Query
+    const topProductsRaw = await prisma.$queryRaw`
+      SELECT 
+        si.product_id AS productId,
+        mp.product_name AS productName,
+        mp.barcode AS barcode,
+        SUM(si.quantity) AS totalQuantity,
+        SUM(si.quantity * si.price_per_unit) AS totalRevenue
+      FROM sale_items si
+      JOIN sales s ON si.sale_id = s.id
+      LEFT JOIN master_products mp ON si.product_id = mp.id
+      WHERE s.shop_id = ${shopId}
+        AND s.created_at >= ${startDate}
+        AND si.product_id IS NOT NULL
+      GROUP BY si.product_id, mp.product_name, mp.barcode
+      ORDER BY totalQuantity DESC
+      LIMIT 5
+    `;
+
+    const topProducts = topProductsRaw.map((item) => ({
+      productId: item.productId,
+      productName: item.productName || "Unknown Product",
+      barcode: item.barcode || "",
+      totalQuantity: Number(item.totalQuantity || 0),
+      totalRevenue: Number(item.totalRevenue || 0),
+    }));
+
+    return res.status(200).json({
       success: true,
+      message: "Reports analytics fetched successfully",
       data: {
-        summary: {
-          totalSalesCount: todaysSales.length, // Kitne bills bane
-          totalRevenue: totalRevenue.toFixed(2), // Kitna paisa aaya
-          totalDiscountGiven: totalDiscount.toFixed(2), // Kitna discount diya
-          totalItemsSold: totalItemsSold, // Kitne products bike
-          averageBillValue: todaysSales.length > 0 
-            ? (totalRevenue / todaysSales.length).toFixed(2) 
-            : "0.00",
-        },
-        paymentBreakup: {
-          CASH: paymentBreakup.CASH.toFixed(2),
-          UPI: paymentBreakup.UPI.toFixed(2),
-          CARD: paymentBreakup.CARD.toFixed(2),
-          CREDIT: paymentBreakup.CREDIT.toFixed(2),
-        },
-        topSellingProducts: topProducts,
+        totalSales,
+        totalOrders,
+        graphData,
+        topProducts,
       },
     });
   } catch (error) {
-    res.status(500).json({
+    console.error("Daily Sales Summary Error:", error);
+    return res.status(500).json({
       success: false,
-      message: "Daily sales analytics fetch karne mein issue aaya!",
+      message: "Analytics fetch error",
       error: error.message,
     });
   }
 };
 
-module.exports = { getDailySalesSummary };
+module.exports = { getSalesSummary };
